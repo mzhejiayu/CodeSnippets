@@ -1,0 +1,110 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-vol
+spec:
+  storageClassName: manual
+  hostPath:
+    path: ~/vol
+  capacity:
+    storage: 10Gi
+  accessModes: 
+  - ReadWriteOnce
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-vol
+spec:
+  storageClassName: manual
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 3Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: haproxy-config
+data:
+  haproxy-conf: |
+    global
+      daemon
+      maxconn 256
+    defaults
+      mode http
+      timeout connect 5000ms
+    frontend http-in
+      bind *:83
+      default_backend servers
+    backend servers
+        server server1 127.0.0.1:80 maxconn 32
+    listen stats # Define a listen section called "stats"
+      bind *:9000 # Listen on localhost:9000
+      mode http
+      stats enable  # Enable stats page
+      stats hide-version  # Hide HAProxy version
+      stats realm Haproxy\ Statistics  # Title text for popup window
+      stats uri /haproxy_stats  # Stats URI
+      # stats auth Username:Password  # Authentication credentials
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: haproxy
+spec:
+  selector:
+    app: haproxy
+  ports:
+  - name: haproxy
+    port: 81
+    targetPort: 83
+  - name: haproxy-stats
+    port: 9000
+    targetPort: 9000
+  - name: nginx
+    port: 80
+    targetPort: 80
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: haproxy
+  labels:
+    app: haproxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: haproxy
+  template:
+    metadata:
+      labels:
+        app: haproxy
+    spec:
+      containers:
+      - name: haproxy
+        image: haproxy:1.8-alpine 
+        ports:
+        - containerPort: 81
+        - containerPort: 9000
+        volumeMounts:
+        # - name: pvc-vol
+        #   mountPath: /web
+        - name: conf-vol
+          mountPath: /usr/local/etc/haproxy/
+      - name: nginx
+        image: nginx 
+        ports:
+        - containerPort: 80
+      volumes:
+      # - name: pvc-vol
+      #   persistentVolumeClaim:
+      #     claimName: pvc-vol
+      - name: conf-vol
+        configMap:
+          name: haproxy-config
+          items:
+          - key: haproxy-conf
+            path: haproxy.cfg
